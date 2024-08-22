@@ -6,8 +6,13 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=d32239bcb673463ab874e80d47fae504"
 
 inherit pypi python3targetconfig python3-dir qt6-qmake qt6-paths
 
-PYPI_PACKAGE = "PyQt6"
+export SYSROOT="${STAGING_DIR_TARGET}"
+export SIP_INCLUDE_DIR="${STAGING_INCDIR}"
+export PYTHON_INCLUDE_DIR="${STAGING_INCDIR}/${PYTHON_DIR}"
+export PYTHON_LIBRARY="${STAGING_LIBDIR}/lib${PYTHON_DIR}${PYTHON_ABI}.so"
+export SIP_MODULE="PyQt6.sip"
 
+PYPI_PACKAGE = "PyQt6"
 SRC_URI[sha256sum] = "9f158aa29d205142c56f0f35d07784b8df0be28378d20a97bcda8bd64ffd0379"
 
 S = "${WORKDIR}/PyQt6-${PV}"
@@ -35,6 +40,9 @@ RDEPENDS:${PN} += " \
     python3-pyqt6-sip \
 "
 
+PYTHON_INCLUDE_DIR = "${STAGING_INCDIR}/${PYTHON_DIR}"
+PYTHON_LIBRARY = "${STAGING_LIBDIR}/lib${PYTHON_DIR}${PYTHON_ABI}.so"
+
 # Disable support of 128bit ints and add path to Python.h
 CXXFLAGS += " -DQT_NO_INT128 -I${PYTHON_INCLUDE_DIR}"
 
@@ -55,21 +63,36 @@ PYQT_MODULES = " \
     QtNetwork \
     QtQml \
     QtSql \
+    QtWidgets \
+"
+
+EXTRA_QMAKEVARS_PRE += " \
+    QMAKE_INCDIR_PYTHON=${PYTHON_INCLUDE_DIR} \
+    INCLUDEPATH+=${PYTHON_INCLUDE_DIR} \
+    QMAKE_LIBS_PYTHON=-lpython${PYTHON_BASEVERSION} \
+    PYTHON_INSTALL_DIR=${PYTHON_SITEPACKAGES_DIR} \
 "
 
 do_configure() {
     local i
     local extra_args
-
     for i in ${DISABLED_FEATURES}; do
         extra_args="${extra_args} --disabled-feature=${i}"
     done
-
     for i in ${PYQT_MODULES}; do
         extra_args="${extra_args} --enable=${i}"
     done
-
     cd ${S}
+
+    # Set environment variables instead of passing as arguments
+    export SYSROOT="${STAGING_DIR_TARGET}"
+    export SIP_INCLUDE_DIR="${STAGING_INCDIR}"
+    export PYTHON_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
+    export PYTHON_LIBRARY="${PYTHON_LIBRARY}"
+    export SIP_MODULE="PyQt6.sip"
+    export QMAKE_INCDIR_PYTHON="${PYTHON_INCLUDE_DIR}"
+    export INCLUDEPATH="${PYTHON_INCLUDE_DIR}"
+
     sip-build \
         --verbose \
         --confirm-license \
@@ -81,10 +104,15 @@ do_configure() {
         --pep484-pyi \
         --no-dbus-python \
         ${extra_args}
-
+    
     QMAKE_PROFILES=${B}/PyQt6.pro
 }
 
+do_configure:append() {
+    for makefile in $(find ${B} -name 'Makefile*'); do
+        sed -i "s|-I/usr/include/python3.11|-I${PYTHON_INCLUDE_DIR}|g" $makefile
+    done
+}
 do_compile:append() {
     sed -i "s,${STAGING_DIR_TARGET},," ${B}/inventory.txt
 }
@@ -97,6 +125,7 @@ do_install:append() {
 pyqt_fix_sources() {
     find ${PKGD}/usr/src/debug/${PN} -type f -exec sed -i "s,\(${B}\|${S}\),/usr/src/debug/${PN}/${PV}-${PR},g" {} \;
 }
+
 PACKAGESPLITFUNCS:prepend = "pyqt_fix_sources"
 
 FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR} ${OE_QMAKE_PATH_PLUGINS}"
